@@ -1,0 +1,89 @@
+# Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation template for creating blog resources.
+Resources:
+    ddbtable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+            AttributeDefinitions:
+            -
+                AttributeName: "ROWID"
+                AttributeType: "N"
+            KeySchema:
+            -
+                AttributeName: "ROWID"
+                KeyType: "HASH"
+            ProvisionedThroughput:
+                ReadCapacityUnits: "20"
+                WriteCapacityUnits: "20"
+            StreamSpecification:
+                StreamViewType: "NEW_IMAGE" 
+    ElasticsearchDomain:
+        Type: AWS::Elasticsearch::Domain
+        Properties: 
+          EBSOptions:
+            EBSEnabled: "True"
+            VolumeType: "standard"
+            VolumeSize: "10"
+          ElasticsearchClusterConfig:
+            InstanceType: "t2.small.elasticsearch"
+            InstanceCount: "1"
+          ElasticsearchVersion: "6.0"
+          Tags:
+            - 
+                Key: "Name"
+                Value: "CMBlogESCluster"
+    LambdaRole:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  -
+                    Sid: ""
+                    Effect: "Allow"
+                    Principal:
+                      Service:
+                        - "lambda.amazonaws.com"
+                    Action:
+                      - "sts:AssumeRole"
+            ManagedPolicyArns:
+                - "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+                - "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
+                - "arn:aws:iam::aws:policy/AmazonESFullAccess"
+    LambdaFunction:
+        Type: "AWS::Lambda::Function"
+        Properties:
+            Handler: "sample.handler"
+            Role: !GetAtt LambdaRole.Arn
+            Code:
+              S3Bucket: "aws-ml-blog"
+              S3Key: "artifacts/clinical-entities-comprehend/Lambda.zip"      
+            Runtime: "python3.6"
+            Timeout: "100"
+    LamdaEventSource:
+        Type: AWS::Lambda::EventSourceMapping
+        Properties: 
+            BatchSize: 100
+            Enabled: True
+            EventSourceArn: 
+                Fn::GetAtt:
+                    - ddbtable
+                    - StreamArn
+            FunctionName: 
+                Fn::GetAtt:
+                    - LambdaFunction
+                    - Arn
+            StartingPosition: TRIM_HORIZON
+Outputs:
+  DynamoDBTable:
+    Description: DynamoDB table created for the workshop
+    Value: !Ref ddbtable
+  LambdaFunction:
+    Description: Lambda Function to stream data from DynamoDB to Elasticsearch
+    Value: !Ref LambdaFunction
+  Elasticsearch:
+    Description: Elasticseach domain Endpoint
+    Value: !Join ['',['https://',!GetAtt ElasticsearchDomain.DomainEndpoint]]
